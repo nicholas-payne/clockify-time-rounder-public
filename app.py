@@ -7,10 +7,10 @@ import datetime as dt
 import altair as alt
 import os
 
-CLOCKIFY_API_KEY = os.getenv("API_KEY")
+CLOCKIFY_API_KEY = os.getenv("CLOCKIFY_API_KEY")
 
 if not CLOCKIFY_API_KEY:
-    raise RuntimeError("API_KEY environment variable not set")
+    raise RuntimeError("CLOCKIFY_API_KEY environment variable not set")
 
 # Accessing workspace data from Clockify first
 header = {'X-Api-Key':CLOCKIFY_API_KEY}
