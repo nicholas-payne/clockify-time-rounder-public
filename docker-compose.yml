@@ -9,9 +9,3 @@ services:
     environment:
       - CLOCKIFY_API_KEY=${CLOCKIFY_API_KEY}
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
