@@ -4,8 +4,13 @@ import numpy as np
 import requests
 import json
 import datetime as dt
-from api_key import CLOCKIFY_API_KEY
 import altair as alt
+import os
+
+CLOCKIFY_API_KEY = os.getenv("API_KEY")
+
+if not CLOCKIFY_API_KEY:
+    raise RuntimeError("API_KEY environment variable not set")
 
 # Accessing workspace data from Clockify first
 header = {'X-Api-Key':CLOCKIFY_API_KEY}

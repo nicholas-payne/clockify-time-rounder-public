@@ -1,0 +1,11 @@
+version: "3.8"
+
+services:
+  streamlit-app:
+    build: .
+    container_name: streamlit_app
+    ports:
+      - "8501:8501"
+    environment:
+      - API_KEY=${API_KEY}
+    restart: unless-stopped
