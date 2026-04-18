@@ -66,6 +66,10 @@ response = requests.post(url, headers=headers, data=json.dumps(body))
 
 # Parsing response from clockify post request
 df_time_intervals = pd.DataFrame(json.loads(response.text)['timeentries'])
+if df_time_intervals.empty:
+    st.warning("There are no time entries in this window yet")
+    st.stop()
+
 df_time_intervals['Date'] = pd.json_normalize(df_time_intervals['timeInterval'])['start'].str[:10]
 df_time_intervals['duration_seconds'] = pd.json_normalize(df_time_intervals['timeInterval'])['duration']
 
