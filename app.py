@@ -21,6 +21,15 @@ workspace_id = json.loads(r.text)["activeWorkspace"]
 st.title('Clockify Weekly Time Report with Rounding')
 st.subheader('Published by NP')
 
+method = st.radio(
+    "Select the report type",
+    ["New method",'Old method'],
+    captions=[
+        "Biweekly billing with specified EOD time",
+        "Weekly billing swith specified daily hours"
+    ]
+)
+
 # Selecting Invoice Date using streamlit date picker
 invoice_date = st.date_input(
     "Select Invoice Date",
@@ -115,6 +124,23 @@ bars = (
         y=alt.Y('rounded_hours:Q', title='Rounded Hours')
     )
 )
+def day_of_week_checker(inv_date,target_iso_day):
+    '''
+    Checks the input date for day of the week and compares to the target day of the week. 1=Monday, ..., 7=Sunday
+    Returns the true invoice date rolled forward
+
+    '''
+    inv_date_week_day = inv_date.isoweekday()
+
+    days = target_iso_day - inv_date_week_day
+
+    if target_iso_day < inv_date_week_day:
+        days += 7
+        st.write('Provided date', invoice_date, 'is not a Monday. Invoice Date set forward to the nearest Monday', true_invoice_date)
+
+    true_inv_day = inv_date + dt.timedelta(days=days)
+    
+    return true_inv_day,
 
 labels = (
     alt.Chart(df_durations_pretty)
