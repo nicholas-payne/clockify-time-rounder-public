@@ -88,20 +88,13 @@ def biweekly_from_start_checker(inv_date: dt.date, new_method_start_date: dt.dat
 
     return true_inv_biweekly
 
-if method == 'Old method':
-    # This method currently only works for Mondays with Monday-Sunday invoicing
+def extract_times_from_clockify(true_inv_date: dt.date,display_days:int):
+    
+    start_date = true_inv_date - dt.timedelta(days=display_days)
+    end_date = true_inv_date - dt.timedelta(days=1)
 
-    # Ensuring Monday is selected or picking the next Monday if needed
-    true_invoice_date,true_invoice_week_day = day_of_week_checker(invoice_date,1)
-
-    # Calculating date ranges for invoice
-    start_date = true_invoice_date - dt.timedelta(days=7)
-    end_date = true_invoice_date - dt.timedelta(days=1)
-    st.write(true_invoice_week_day,'of Previous Week:',start_date)
-
-    # Pulling reports from clocify using workspace ID and invoice date range
     url = f"https://reports.api.clockify.me/v1/workspaces/{workspace_id}/reports/detailed"
-
+    
     headers = {
         "X-Api-Key": CLOCKIFY_API_KEY,
         "Content-Type": "application/json",
@@ -114,11 +107,23 @@ if method == 'Old method':
         "detailedFilter": {
             "page": 1,
             "pageSize": 50,
-        },
-        "startWeek":"MONDAY",
+        }
     }
 
     response = requests.post(url, headers=headers, data=json.dumps(body))
+
+    return response, start_date, end_date
+
+if method == 'Old method':
+    # This method currently only works for Mondays with Monday-Sunday invoicing
+
+    # Ensuring Monday is selected or picking the next Monday if needed
+    invoice_days = 7
+    true_invoice_date,true_invoice_week_day = day_of_week_checker(invoice_date,1)
+
+    # Extract time entries from Clockify
+    response, start_date, end_date = extract_times_from_clockify(true_invoice_date,invoice_days)
+    st.write(true_invoice_week_day,'of Previous Week:',start_date)
 
     # Parsing response from clockify post request
     df_time_intervals = pd.DataFrame(json.loads(response.text)['timeentries'])
@@ -198,5 +203,7 @@ elif method == 'New method':
         invoice_date,
         new_method_start_date)
 
-        
+    
+
+
 
