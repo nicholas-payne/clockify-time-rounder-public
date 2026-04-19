@@ -8,7 +8,13 @@ import altair as alt
 import os
 import calendar
 
-CLOCKIFY_API_KEY = os.getenv("CLOCKIFY_API_KEY")
+from api_key import CLOCKIFY_API_KEY
+
+# CLOCKIFY_API_KEY = os.getenv("CLOCKIFY_API_KEY")
+# NEW_METHOD_START = os.getenv("NEW_METHOD_START")
+
+# Start date needs to be specified since the new method is biweekly reporting
+NEW_METHOD_START_DATE = dt.datetime.strptime("2026-03-01","%Y-%m-%d").date()
 
 if not CLOCKIFY_API_KEY:
     raise RuntimeError("CLOCKIFY_API_KEY environment variable not set")
@@ -37,7 +43,7 @@ invoice_date = st.date_input(
     'today'
 )
 
-def day_of_week_checker(inv_date,target_iso_day):
+def day_of_week_checker(inv_date: dt.date, target_iso_day: int):
     '''
     Checks the input date for day of the week and compares to the target day of the week. 1=Monday, ..., 7=Sunday
     Returns the true invoice date rolled forward
@@ -46,37 +52,29 @@ def day_of_week_checker(inv_date,target_iso_day):
     inv_date_week_day = inv_date.isoweekday()
     target_day_name = calendar.day_name[target_iso_day-1]
 
-    days = target_iso_day - inv_date_week_day
+    days = (target_iso_day - inv_date_week_day) % 7
 
-    if target_iso_day < inv_date_week_day:
-        days += 7
-        true_inv_day = inv_date + dt.timedelta(days=days)
-        st.write('Provided date', invoice_date, 'is not a', target_day_name,'. Invoice Date set forward to: ', true_inv_day)
+    if days == 0:
+        true_inv = inv_date
+        st.write("Invoice Date:",true_inv)
+
     else:
-        true_inv_day = inv_date + dt.timedelta(days=days)
-        st.write("Invoice Date:",true_inv_day)
+        true_inv = inv_date + dt.timedelta(days=days)
+        st.write('Provided date', invoice_date, 'is not a', target_day_name,'. Invoice Date set forward to: ', true_inv)
     
-    return true_inv_day
+    return true_inv,target_day_name
 
 
 if method == 'Old method':
+    # This method currently only works for Mondays with Monday-Sunday invoicing
 
-    true_invoice_date = day_of_week_checker(invoice_date)
     # Ensuring Monday is selected or picking the next Monday if needed
-    invoice_date_week_day = invoice_date.isoweekday()
-
-    if invoice_date_week_day != 1:
-        true_invoice_date = invoice_date + dt.timedelta(days=8-invoice_date_week_day)
-        st.write('Provided date', invoice_date, 'is not a Monday. Invoice Date set forward to the nearest Monday', true_invoice_date)
-
-    else:
-        true_invoice_date = invoice_date
-        st.write("Invoice Date:",invoice_date)
+    true_invoice_date,true_invoice_week_day = day_of_week_checker(invoice_date,1)
 
     # Calculating date ranges for invoice
     start_date = true_invoice_date - dt.timedelta(days=7)
     end_date = true_invoice_date - dt.timedelta(days=1)
-    st.write('Monday of Previous Week:',start_date)
+    st.write(true_invoice_week_day,'of Previous Week:',start_date)
 
     # Pulling reports from clocify using workspace ID and invoice date range
     url = f"https://reports.api.clockify.me/v1/workspaces/{workspace_id}/reports/detailed"
@@ -152,12 +150,26 @@ if method == 'Old method':
     )
 
     labels = (
+        alt.Chart(df_durations_pretty)
+        .mark_text(
+            color='white',
+            fontWeight='bold',
+            dy=-10,
+            size=14
+        )
+        .encode(
             x=alt.X("Day:N", sort=days_of_week),
             y=alt.Y("rounded_hours:Q"),
+            text=alt.Text("rounded_hours:Q", format="~g")
+        )
     )
 
     chart = bars + labels
 
     st.altair_chart(chart, width='stretch')
 
+elif method == 'New method':
+
+    # Ensuring SUNDAY is selected and the date aligns with a biweekly payroll cadence
+    true_invoice_date,true_invoice_week_day = day_of_week_checker(invoice_date,7)
 
