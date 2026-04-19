@@ -14,7 +14,7 @@ from api_key import CLOCKIFY_API_KEY
 # NEW_METHOD_START = os.getenv("NEW_METHOD_START")
 
 # Start date needs to be specified since the new method is biweekly reporting
-NEW_METHOD_START_DATE = dt.datetime.strptime("2026-03-01","%Y-%m-%d").date()
+new_method_start_date = dt.datetime.strptime("2026-03-01","%Y-%m-%d").date()
 
 if not CLOCKIFY_API_KEY:
     raise RuntimeError("CLOCKIFY_API_KEY environment variable not set")
@@ -47,7 +47,6 @@ def day_of_week_checker(inv_date: dt.date, target_iso_day: int):
     '''
     Checks the input date for day of the week and compares to the target day of the week. 1=Monday, ..., 7=Sunday
     Returns the true invoice date rolled forward
-
     '''
     inv_date_week_day = inv_date.isoweekday()
     target_day_name = calendar.day_name[target_iso_day-1]
@@ -60,10 +59,34 @@ def day_of_week_checker(inv_date: dt.date, target_iso_day: int):
 
     else:
         true_inv = inv_date + dt.timedelta(days=days)
-        st.write('Provided date', invoice_date, 'is not a', target_day_name,'. Invoice Date set forward to: ', true_inv)
+        st.write(
+            'Provided date', 
+            invoice_date, 
+            'is not a', 
+            target_day_name,
+            '. Invoice Date set forward to: ', 
+            true_inv)
     
     return true_inv,target_day_name
 
+def biweekly_from_start_checker(inv_date: dt.date, new_method_start_date: dt.date):
+    '''
+    Checks the invoice date to see if it aligns within the biweekly cadence from the start date
+    '''
+    days_from_biweekly = (inv_date - new_method_start_date).days % 14
+
+    if days_from_biweekly == 0:
+        true_inv_biweekly = inv_date
+        st.write("Reporting Delivery Date: ", inv_date)
+    else:
+        true_inv_biweekly = inv_date + dt.timedelta(days = days_from_biweekly)
+        st.write(
+            'Provided date', 
+            inv_date, 
+            'is not on the biweekly schedule. Reporting Date set forward to: ', 
+            true_inv_biweekly)
+
+    return true_inv_biweekly
 
 if method == 'Old method':
     # This method currently only works for Mondays with Monday-Sunday invoicing
@@ -171,5 +194,9 @@ if method == 'Old method':
 elif method == 'New method':
 
     # Ensuring SUNDAY is selected and the date aligns with a biweekly payroll cadence
-    true_invoice_date,true_invoice_week_day = day_of_week_checker(invoice_date,7)
+    true_invoice_date = biweekly_from_start_checker(
+        invoice_date,
+        new_method_start_date)
+
+        
 
