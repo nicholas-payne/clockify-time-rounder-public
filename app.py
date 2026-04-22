@@ -16,6 +16,7 @@ from api_key import CLOCKIFY_API_KEY
 
 # Start date needs to be specified since the new method is biweekly reporting
 new_method_start_date = dt.datetime.strptime("2026-03-01","%Y-%m-%d").date()
+RATE = 50 #placeholder
 
 if not CLOCKIFY_API_KEY:
     raise RuntimeError("CLOCKIFY_API_KEY environment variable not set")
@@ -143,11 +144,10 @@ def create_display_df(api_response,start_date,end_date,invoice_days):
     df_durations_pretty.index = df_durations_pretty.index.date
     df_durations_pretty.index.name = 'Date'
 
-    df_durations_pretty['Pay'] = df_durations_pretty['rounded_hours'] * 50
+    df_durations_pretty['Pay'] = df_durations_pretty['rounded_hours'] * RATE
     df_durations_pretty['Pay'] = "$" + df_durations_pretty['Pay'].astype('int').astype('str')
 
-    st.write(df_durations_pretty)
-
+    st.dataframe(df_durations_pretty,height='content')
     return df_durations, df_durations_pretty, days_of_week
 
 
@@ -155,7 +155,7 @@ if method == 'Old method':
     # This method currently only works for Mondays with Monday-Sunday invoicing
 
     # Ensuring Monday is selected or picking the next Monday if needed
-    invoice_days = 7
+    invoice_days = 14
     invoice_day_of_week = 1
     true_invoice_date,true_invoice_week_day = day_of_week_checker(invoice_date,invoice_day_of_week)
 
@@ -168,7 +168,7 @@ if method == 'Old method':
 
     # Calculating total hours and pay for display
     total_hours = df_durations['rounded_hours'].sum()
-    total_pay = total_hours*50
+    total_pay = total_hours*RATE
     st.markdown(f"Total number of hours: :green-badge[{total_hours}]")
 
     total_pay_pretty = '$' + f'{total_pay:.2f}'
