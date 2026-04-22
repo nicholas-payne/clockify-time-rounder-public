@@ -12,6 +12,7 @@ from api_key import CLOCKIFY_API_KEY
 
 # CLOCKIFY_API_KEY = os.getenv("CLOCKIFY_API_KEY")
 # NEW_METHOD_START = os.getenv("NEW_METHOD_START")
+# RATE = os.getenv("RATE")
 
 # Start date needs to be specified since the new method is biweekly reporting
 new_method_start_date = dt.datetime.strptime("2026-03-01","%Y-%m-%d").date()
@@ -114,18 +115,8 @@ def extract_times_from_clockify(true_inv_date: dt.date,display_days:int):
 
     return response, start_date, end_date
 
-if method == 'Old method':
-    # This method currently only works for Mondays with Monday-Sunday invoicing
+def create_display_df(api_response,start_date,end_date,invoice_days):
 
-    # Ensuring Monday is selected or picking the next Monday if needed
-    invoice_days = 7
-    true_invoice_date,true_invoice_week_day = day_of_week_checker(invoice_date,1)
-
-    # Extract time entries from Clockify
-    response, start_date, end_date = extract_times_from_clockify(true_invoice_date,invoice_days)
-    st.write(true_invoice_week_day,'of Previous Week:',start_date)
-
-    # Parsing response from clockify post request
     df_time_intervals = pd.DataFrame(json.loads(response.text)['timeentries'])
     if df_time_intervals.empty:
         st.warning("There are no time entries in this window yet")
@@ -134,12 +125,10 @@ if method == 'Old method':
     df_time_intervals['Date'] = pd.json_normalize(df_time_intervals['timeInterval'])['start'].str[:10]
     df_time_intervals['duration_seconds'] = pd.json_normalize(df_time_intervals['timeInterval'])['duration']
 
-    # Creating smaller dataframe with relevant columns to sum times per day
-    df_durations = df_time_intervals[['Date','duration_seconds']].groupby('Date').sum().reset_index()
-
-    days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-
+    days_of_week = ([calendar.day_name[(start_date + dt.timedelta(days=x)).isoweekday()-1] for x in range(invoice_days)])
     full_range = pd.date_range(start_date,end_date,freq='D')
+    
+    df_durations = df_time_intervals[['Date','duration_seconds']].groupby('Date').sum().reset_index()
     df_durations["Date"] = pd.to_datetime(df_durations["Date"], format="%Y-%m-%d")
     df_durations = df_durations.set_index('Date').reindex(full_range,fill_value=0)
     df_durations['Day'] = days_of_week
@@ -158,6 +147,24 @@ if method == 'Old method':
     df_durations_pretty['Pay'] = "$" + df_durations_pretty['Pay'].astype('int').astype('str')
 
     st.write(df_durations_pretty)
+
+    return df_durations, df_durations_pretty, days_of_week
+
+
+if method == 'Old method':
+    # This method currently only works for Mondays with Monday-Sunday invoicing
+
+    # Ensuring Monday is selected or picking the next Monday if needed
+    invoice_days = 7
+    invoice_day_of_week = 1
+    true_invoice_date,true_invoice_week_day = day_of_week_checker(invoice_date,invoice_day_of_week)
+
+    # Extract time entries from Clockify
+    response, start_date, end_date = extract_times_from_clockify(true_invoice_date,invoice_days)
+    st.write(true_invoice_week_day,'of Previous Week:',start_date)
+
+    df_durations, df_durations_pretty, days_of_week = create_display_df(response, start_date, end_date, invoice_days)
+
 
     # Calculating total hours and pay for display
     total_hours = df_durations['rounded_hours'].sum()
@@ -202,6 +209,8 @@ elif method == 'New method':
     true_invoice_date = biweekly_from_start_checker(
         invoice_date,
         new_method_start_date)
+
+    
 
     
 
