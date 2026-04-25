@@ -8,4 +8,6 @@ services:
       - "8501:8501"
     environment:
       - CLOCKIFY_API_KEY=${CLOCKIFY_API_KEY}
+      - RATE=${RATE}
+      - NEW_METHOD_START=${NEW_METHOD_START}
     restart: unless-stopped

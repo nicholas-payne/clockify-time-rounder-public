@@ -6,8 +6,17 @@ import json
 import datetime as dt
 import altair as alt
 import os
+import calendar
+
+# from api_key import CLOCKIFY_API_KEY
 
 CLOCKIFY_API_KEY = os.getenv("CLOCKIFY_API_KEY")
+NEW_METHOD_START = os.getenv("NEW_METHOD_START") #Example format 2026-01-25
+RATE = float(os.getenv("RATE"))
+
+# Start date needs to be specified since the new method is biweekly reporting
+new_method_start_date = dt.datetime.strptime(NEW_METHOD_START,"%Y-%m-%d").date()
+
 
 if not CLOCKIFY_API_KEY:
     raise RuntimeError("CLOCKIFY_API_KEY environment variable not set")
@@ -19,7 +28,15 @@ workspace_id = json.loads(r.text)["activeWorkspace"]
 
 # Streamlit app display header
 st.title('Clockify Weekly Time Report with Rounding')
-st.subheader('Published by NP')
+
+method = st.radio(
+    "Select the report type",
+    ["New method",'Old method'],
+    captions=[
+        "Biweekly billing with specified EOD time",
+        "Weekly billing swith specified daily hours"
+    ]
+)
 
 # Selecting Invoice Date using streamlit date picker
 invoice_date = st.date_input(
@@ -27,110 +44,254 @@ invoice_date = st.date_input(
     'today'
 )
 
-# Ensuring Monday is selected or picking the next Monday if needed
-invoice_date_week_day = invoice_date.isoweekday()
+def day_of_week_checker(inv_date: dt.date, target_iso_day: int):
+    '''
+    Checks the input date for day of the week and compares to the target day of the week. 1=Monday, ..., 7=Sunday
+    Returns the true invoice date rolled forward
+    '''
+    inv_date_week_day = inv_date.isoweekday()
+    target_day_name = calendar.day_name[target_iso_day-1]
 
-if invoice_date_week_day > 1:
-    true_invoice_date = invoice_date + dt.timedelta(days=8-invoice_date_week_day)
-    st.write('Provided date', invoice_date, 'is not a Monday. Invoice Date set forward to the nearest Monday', true_invoice_date)
+    days = (target_iso_day - inv_date_week_day) % 7
 
-else:
-    true_invoice_date = invoice_date
-    st.write("Invoice Date:",invoice_date)
+    if days == 0:
+        true_inv = inv_date
+        st.write("Invoice Date:",true_inv)
 
-# Calculating date ranges for invoice
-start_date = true_invoice_date - dt.timedelta(days=7)
-end_date = true_invoice_date - dt.timedelta(days=1)
-st.write('Monday of Previous Week:',start_date)
+    else:
+        true_inv = inv_date + dt.timedelta(days=days)
+        st.write(
+            'Provided date', 
+            invoice_date, 
+            'is not a', 
+            target_day_name,
+            '. Invoice Date set forward to: ', 
+            true_inv)
+    
+    return true_inv,target_day_name
 
-# Pulling reports from clocify using workspace ID and invoice date range
-url = f"https://reports.api.clockify.me/v1/workspaces/{workspace_id}/reports/detailed"
+def biweekly_from_start_checker(inv_date: dt.date, new_method_start_date: dt.date):
+    '''
+    Checks the invoice date to see if it aligns within the biweekly cadence from the start date
+    '''
+    days_from_biweekly = (inv_date - new_method_start_date).days % 14
+    days_to_biweekly = 14 - days_from_biweekly
 
-headers = {
-    "X-Api-Key": CLOCKIFY_API_KEY,
-    "Content-Type": "application/json",
-}
+    if days_from_biweekly == 0:
+        true_inv_biweekly = inv_date
+        st.write("Submission Deadline: ", inv_date)
+    else:
+        true_inv_biweekly = inv_date + dt.timedelta(days = days_to_biweekly)
+        st.write(
+            'Provided date', 
+            inv_date, 
+            'is not on the biweekly schedule. Reporting Date set forward to: ', 
+            true_inv_biweekly)
 
-body = {
-    "dateRangeStart": f"{start_date}T00:00:00",
-    "dateRangeEnd": f"{end_date}T23:59:59",
-    "timeZone": "America/Toronto",
-    "detailedFilter": {
-        "page": 1,
-        "pageSize": 50,
-    },
-    "startWeek":"MONDAY",
-}
+    return true_inv_biweekly
 
-response = requests.post(url, headers=headers, data=json.dumps(body))
+def extract_times_from_clockify(true_inv_date: dt.date,display_days:int):
+    '''
+    Queries the Clockify API to pull all time entries in the previous {display_days} days from {true_inv_date}
+    '''
+    
+    start_date = true_inv_date - dt.timedelta(days=display_days)
+    end_date = true_inv_date - dt.timedelta(days=1)
 
-# Parsing response from clockify post request
-df_time_intervals = pd.DataFrame(json.loads(response.text)['timeentries'])
-if df_time_intervals.empty:
-    st.warning("There are no time entries in this window yet")
-    st.stop()
+    url = f"https://reports.api.clockify.me/v1/workspaces/{workspace_id}/reports/detailed"
+    
+    headers = {
+        "X-Api-Key": CLOCKIFY_API_KEY,
+        "Content-Type": "application/json",
+    }
 
-df_time_intervals['Date'] = pd.json_normalize(df_time_intervals['timeInterval'])['start'].str[:10]
-df_time_intervals['duration_seconds'] = pd.json_normalize(df_time_intervals['timeInterval'])['duration']
+    body = {
+        "dateRangeStart": f"{start_date}T00:00:00",
+        "dateRangeEnd": f"{end_date}T23:59:59",
+        "timeZone": "America/Toronto",
+        "detailedFilter": {
+            "page": 1,
+            "pageSize": 50,
+        }
+    }
 
-# Creating smaller dataframe with relevant columns to sum times per day
-df_durations = df_time_intervals[['Date','duration_seconds']].groupby('Date').sum().reset_index()
+    response = requests.post(url, headers=headers, data=json.dumps(body))
 
-days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    return response, start_date, end_date
 
-full_range = pd.date_range(start_date,end_date,freq='D')
-df_durations["Date"] = pd.to_datetime(df_durations["Date"], format="%Y-%m-%d")
-df_durations = df_durations.set_index('Date').reindex(full_range,fill_value=0)
-df_durations['Day'] = days_of_week
+def create_durations_df(api_response,start_date,end_date,invoice_days):
 
-# Rounding to the nearest half an hour via 1800 seconds
-df_durations['rounded_seconds'] = np.ceil(df_durations['duration_seconds']/1800)*1800
-df_durations['rounded_hours'] = df_durations['rounded_seconds']/3600
-df_durations = df_durations.reset_index(names='Date')
+    df_time_intervals = pd.DataFrame(json.loads(response.text)['timeentries'])
+    if df_time_intervals.empty:
+        st.warning("There are no time entries in this window yet")
+        st.stop()
 
-# Displaying a tidy dataframe, consistent with invoice entry system
-df_durations_pretty = df_durations[['Day','Date','rounded_hours']].set_index('Date').copy()
-df_durations_pretty.index = df_durations_pretty.index.date
-df_durations_pretty.index.name = 'Date'
+    df_time_intervals['Date'] = pd.json_normalize(df_time_intervals['timeInterval'])['start'].str[:10]
+    df_time_intervals['duration_seconds'] = pd.json_normalize(df_time_intervals['timeInterval'])['duration']
 
-df_durations_pretty['Pay'] = df_durations_pretty['rounded_hours'] * 50
-df_durations_pretty['Pay'] = "$" + df_durations_pretty['Pay'].astype('int').astype('str')
+    days_of_week = ([calendar.day_name[(start_date + dt.timedelta(days=x)).isoweekday()-1] for x in range(invoice_days)])
+    full_range = pd.date_range(start_date,end_date,freq='D')
+    
+    df_durations = df_time_intervals[['Date','duration_seconds']].groupby('Date').sum().reset_index()
+    df_durations["Date"] = pd.to_datetime(df_durations["Date"], format="%Y-%m-%d")
+    df_durations = df_durations.set_index('Date').reindex(full_range,fill_value=0)
+    df_durations["Date_display"] = [date.strftime("%a %b %d") for date in full_range]
+    df_durations['Day'] = days_of_week
 
-st.write(df_durations_pretty)
+    # Rounding to the nearest half an hour via 1800 seconds
+    df_durations['rounded_seconds'] = np.ceil(df_durations['duration_seconds']/1800)*1800
+    df_durations['rounded_hours'] = df_durations['rounded_seconds']/3600
+    df_durations = df_durations.reset_index(names='Date')
 
-# Calculating total hours and pay for display
-total_hours = df_durations['rounded_hours'].sum()
-total_pay = total_hours*50
-st.markdown(f"Total number of hours: :green-badge[{total_hours}]")
+    return df_durations, days_of_week
 
-total_pay_pretty = '$' + f'{total_pay:.2f}'
-st.markdown(f"Total pay: :green-badge[{total_pay_pretty}]")
-
-# Creating a bar chart to show hours per day
-bars = (
-    alt.Chart(df_durations_pretty)
-    .mark_bar()
-    .encode(
-        x=alt.X('Day:N', title='',sort=days_of_week,axis=alt.Axis(labelAngle=0)),
-        y=alt.Y('rounded_hours:Q', title='Rounded Hours')
+def make_bar_chart(df_durations:pd.DataFrame,invoice_days:int):
+    bars = (
+        alt.Chart(df_durations)
+        .mark_bar(size=25*14/invoice_days)
+        .encode(
+            x=alt.X('Date_display:N', title='',sort=alt.SortField(field='Date', order='ascending'),axis=alt.Axis(labelAngle=0)),
+            y=alt.Y('rounded_hours:Q', title='Rounded Hours')
+        )
     )
-)
 
-labels = (
-    alt.Chart(df_durations_pretty)
-    .mark_text(
-        color='white',
-        fontWeight='bold',
-        dy=-10,
-        size=14
+    labels = (
+        alt.Chart(df_durations)
+        .mark_text(
+            color='white',
+            fontWeight='bold',
+            dy=-10,
+            size=14
+        )
+        .encode(
+            x=alt.X('Date_display:N', title='',sort=alt.SortField(field='Date', order='ascending'),axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("rounded_hours:Q"),
+            text=alt.Text("rounded_hours:Q", format="~g")
+        )
     )
-    .encode(
-        x=alt.X("Day:N", sort=days_of_week),
-        y=alt.Y("rounded_hours:Q"),
-        text=alt.Text("rounded_hours:Q", format="~g")
-    )
-)
 
-chart = bars + labels
+    chart = bars + labels
 
-st.altair_chart(chart, width='stretch')
+    st.altair_chart(chart, width='stretch')
+
+if method == 'Old method':
+
+    # Ensuring the specified invoice DOW is selected or picking the next applicable date if needed
+    invoice_days = 7
+    invoice_day_of_week = 1
+    true_invoice_date,true_invoice_week_day = day_of_week_checker(invoice_date,invoice_day_of_week)
+
+    # Extract time entries from Clockify
+    response, start_date, end_date = extract_times_from_clockify(true_invoice_date,invoice_days)
+    st.write(true_invoice_week_day,'of Previous Week:',start_date)
+
+    df_durations, days_of_week = create_durations_df(response, start_date, end_date, invoice_days)
+
+    # Displaying a clean dataframe, consistent with invoice entry system
+    df_durations_pretty = df_durations[['Day','Date','rounded_hours']].set_index('Date').copy()
+    df_durations_pretty.index = df_durations_pretty.index.date
+    df_durations_pretty.index.name = 'Date'
+
+    df_durations_pretty['Pay'] = df_durations_pretty['rounded_hours'] * RATE
+    df_durations_pretty['Pay'] = "$" + df_durations_pretty['Pay'].astype('int').astype('str')
+
+    # st.dataframe(df_durations_pretty,height='content')
+    st.dataframe(df_durations_pretty,height='content')
+
+    # Calculating total hours and pay for display
+    total_hours = df_durations['rounded_hours'].sum()
+    total_pay = total_hours*RATE
+    st.markdown(f"Total number of hours: :green-badge[{total_hours}]")
+
+    total_pay_pretty = '$' + f'{total_pay:.2f}'
+    st.markdown(f"Total pay: :green-badge[{total_pay_pretty}]")
+
+
+    # Creating a bar chart to show hours per day
+    make_bar_chart(df_durations,invoice_days)
+
+elif method == 'New method':
+
+    # Ensuring SUNDAY is selected and the date aligns with a biweekly payroll cadence
+    true_invoice_date = biweekly_from_start_checker(
+        invoice_date,
+        new_method_start_date)
+
+        # Ensuring the specified invoice DOW is selected or picking the next applicable date if needed
+    invoice_days = 14
+
+    # Extract time entries from Clockify
+    response, start_date, end_date = extract_times_from_clockify(true_invoice_date,invoice_days)
+
+    df_durations, days_of_week = create_durations_df(response, start_date, end_date, invoice_days)
+
+    # Displaying a clean dataframe, consistent with invoice entry system
+    df_durations_pretty = df_durations[['Date_display','rounded_hours']].set_index('Date_display').copy()
+    # df_durations_pretty.index = df_durations_pretty.index.date
+    df_durations_pretty.index.name = 'Date'
+    df_durations_pretty.rename(columns={'rounded_hours':'Hours'},inplace=True)
+
+    df_durations_pretty['Pay'] = df_durations_pretty['Hours'] * RATE
+    df_durations_pretty['Pay'] = "$" + df_durations_pretty['Pay'].astype('int').astype('str')
+
+    start_time = 9
+    df_durations_pretty['Start Time'] = f'{start_time}:00 am'
+    df_durations_pretty['End Time'] = start_time + df_durations_pretty['Hours']
+    
+    def decimal_to_time_str(x):
+        hours = int(x)
+        if hours > 12:
+            hours_display = hours - 12
+            am_pm = 'pm'
+        else:
+            hours_display = hours
+            am_pm = 'am'
+
+        minutes = int((x - hours) * 60)
+        t = f"{hours_display}:{minutes:02d} {am_pm}"
+
+        return t
+
+    df_durations_pretty['End Time'] = df_durations_pretty['End Time'].apply(decimal_to_time_str)
+    df_durations_pretty.loc[df_durations_pretty['Hours'] == 0,'Start Time'] = '-'
+    df_durations_pretty.loc[df_durations_pretty['Hours'] == 0,'End Time'] = '-'
+
+    st.dataframe(df_durations_pretty,height='content')
+
+    # Calculating total hours and pay for display
+    total_hours = df_durations['rounded_hours'].sum()
+
+    week_hours_regular = []
+    week_hours_overtime = []
+
+    week_pay_regular = []
+    week_pay_overtime = []
+
+    OT_hours_cutoff = 44
+
+    for week in range(2):
+        week_hours = df_durations['rounded_hours'].iloc[week*7:(week+1)*7].sum()
+
+        if week_hours > OT_hours_cutoff: # Weekly OT threshold dictated by location
+            week_hours_regular.append(OT_hours_cutoff)
+            week_hours_overtime.append(week_hours - week_hours_regular[week])
+            
+            week_pay_regular.append(OT_hours_cutoff * RATE)
+            week_pay_overtime.append(week_hours_overtime[week] * RATE * 1.5) # Overtime rate of time and a half           
+
+        else:           
+            week_hours_regular.append(week_hours)
+            week_hours_overtime.append(0)
+
+            week_pay_regular.append(week_hours_regular[week] * RATE)
+            week_pay_overtime.append(0)
+
+
+    st.markdown(f"Total number of hours: :green-badge[{total_hours}]")
+
+    total_pay = np.sum(week_pay_regular) + np.sum(week_pay_overtime) 
+    total_pay_pretty = '$' + f'{total_pay:.2f}'
+    st.markdown(f"Gross pay: :green-badge[{total_pay_pretty}]")
+
+    # Creating a bar chart to show hours per day
+    make_bar_chart(df_durations,invoice_days)
