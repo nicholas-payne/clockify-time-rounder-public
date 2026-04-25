@@ -12,7 +12,7 @@ import calendar
 
 CLOCKIFY_API_KEY = os.getenv("CLOCKIFY_API_KEY")
 NEW_METHOD_START = os.getenv("NEW_METHOD_START") #Example format 2026-01-25
-RATE = int(os.getenv("RATE"))
+RATE = float(os.getenv("RATE"))
 
 # Start date needs to be specified since the new method is biweekly reporting
 new_method_start_date = dt.datetime.strptime(NEW_METHOD_START,"%Y-%m-%d").date()
