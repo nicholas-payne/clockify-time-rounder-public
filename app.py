@@ -8,15 +8,14 @@ import altair as alt
 import os
 import calendar
 
-from api_key import CLOCKIFY_API_KEY
+# from api_key import CLOCKIFY_API_KEY
 
-# CLOCKIFY_API_KEY = os.getenv("CLOCKIFY_API_KEY")
-# NEW_METHOD_START = os.getenv("NEW_METHOD_START")
-# RATE = os.getenv("RATE")
+CLOCKIFY_API_KEY = os.getenv("CLOCKIFY_API_KEY")
+NEW_METHOD_START = os.getenv("NEW_METHOD_START") #Example format 2026-01-25
+RATE = os.getenv("RATE")
 
 # Start date needs to be specified since the new method is biweekly reporting
-new_method_start_date = dt.datetime.strptime("2026-03-01","%Y-%m-%d").date()
-RATE = 50 #placeholder
+new_method_start_date = dt.datetime.strptime(NEW_METHOD_START,"%Y-%m-%d").date()
 
 if not CLOCKIFY_API_KEY:
     raise RuntimeError("CLOCKIFY_API_KEY environment variable not set")
@@ -253,25 +252,45 @@ elif method == 'New method':
         return t
 
     df_durations_pretty['End Time'] = df_durations_pretty['End Time'].apply(decimal_to_time_str)
+    df_durations_pretty.loc[df_durations_pretty['Hours'] == 0,'Start Time'] = '-'
+    df_durations_pretty.loc[df_durations_pretty['Hours'] == 0,'End Time'] = '-'
 
     st.dataframe(df_durations_pretty,height='content')
 
     # Calculating total hours and pay for display
     total_hours = df_durations['rounded_hours'].sum()
-    total_pay = total_hours*RATE
+
+    week_hours_regular = []
+    week_hours_overtime = []
+
+    week_pay_regular = []
+    week_pay_overtime = []
+
+    OT_hours_cutoff = 44
+
+    for week in range(2):
+        week_hours = df_durations['rounded_hours'].iloc[week*7:(week+1)*7].sum()
+
+        if week_hours > OT_hours_cutoff: # Weekly OT threshold dictated by location
+            week_hours_regular.append(OT_hours_cutoff)
+            week_hours_overtime.append(week_hours - week_hours_regular[week])
+            
+            week_pay_regular.append(OT_hours_cutoff * RATE)
+            week_pay_overtime.append(week_hours_overtime[week] * RATE * 1.5) # Overtime rate of time and a half           
+
+        else:           
+            week_hours_regular.append(week_hours)
+            week_hours_overtime.append(0)
+
+            week_pay_regular.append(week_hours_regular[week] * RATE)
+            week_pay_overtime.append(0)
+
+
     st.markdown(f"Total number of hours: :green-badge[{total_hours}]")
 
+    total_pay = np.sum(week_pay_regular) + np.sum(week_pay_overtime) 
     total_pay_pretty = '$' + f'{total_pay:.2f}'
-    st.markdown(f"Total pay: :green-badge[{total_pay_pretty}]")
-
+    st.markdown(f"Gross pay: :green-badge[{total_pay_pretty}]")
 
     # Creating a bar chart to show hours per day
     make_bar_chart(df_durations,invoice_days)
-
-
-    
-
-    
-
-
-
